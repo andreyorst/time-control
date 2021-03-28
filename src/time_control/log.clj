@@ -4,8 +4,7 @@
             [clojure.string :as str]
             [java-time :as t]
             [me.raynes.fs :as fs])
-  (:import [java.time ZonedDateTime]
-           [java.time.format DateTimeParseException]))
+  (:import [java.time ZonedDateTime]))
 
 (def ^:dynamic *log-dir* (str (fs/file (fs/home) "time-log/")))
 
@@ -63,7 +62,7 @@
 
 (defn create-new-log
   "Creates new log file."
-  ([] (create-new-log (t/format "dd-MM-yyyy" (t/zoned-date-time))))
+  ([] (create-new-log (t/format "dd-MM-yyyy" (t/local-date))))
   ([date]
    (let [filename (str date ".time-log")
          unique-filename (if (fs/exists? (fs/file *log-dir* filename))
@@ -72,7 +71,7 @@
                            filename)
          log-file (fs/file *log-dir* unique-filename)]
      (doto log-file
-       (spit (str "Started at " (t/format "dd MMM yyyy hh:mm:ss" (t/zoned-date-time))))))))
+       (spit "[]")))))
 
 
 (defn- close-last-item
@@ -158,9 +157,9 @@
     (let [total-stats (log-stats log)
           {:keys [start end]} (beg-end-log-dates log)]
       (println (str "Activity summary from "
-                    (t/format "dd MMM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant start) (t/zone-id)))
+                    (t/format "dd MM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant start) (t/zone-id)))
                     " to "
-                    (t/format "dd MMM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant end) (t/zone-id)))))
+                    (t/format "dd MM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant end) (t/zone-id)))))
       (doseq [[category {:keys [days hours minutes seconds]
                          :or {days 0 hours 0 minutes 0 seconds 0}}] total-stats]
         (print-time-summary category days hours minutes seconds)))
@@ -183,7 +182,11 @@
             row-stats (log-stats [last-line])
             {:keys [days hours minutes seconds]
              :or {days 0 hours 0 minutes 0 seconds 0}} (first (vals row-stats))]
-        (print-time-summary (str category " - " descr) days hours minutes seconds))
+        (print-time-summary
+         (if-not (empty? descr)
+           (str category " - " descr)
+           category)
+         days hours minutes seconds))
       (when @log-file
         (println "Current log is empty")))))
 
@@ -192,11 +195,13 @@
   "Adds new activity to the log.  Closes previous activity if not
   closed."
   [type descr]
+  (println "Started new activity:"
+           (if-not (empty? descr) (str type " - " descr) type))
   (swap! log close-last-item)
   (swap! log conj [type {:descr descr
                          :start (t/java-date)}]))
 
-(defn write-log
+(defn write-current
   "Store current log on the file system."
   []
   (when-some [log-file @log-file]
@@ -212,6 +217,10 @@
   (let [l @log
         last (dec (count l))]
     (when-let [line (and (>= last 0) (nth l last))]
+      (println "Updated last activity to"
+               (if-not (empty? category)
+                 (str type " - " (str/join " " descriptions))
+                 type))
       (swap! log assoc last (-> line
                                 (assoc-in [0] category)
                                 (assoc-in [1 :descr] (str/join " " descriptions)))))))
@@ -226,6 +235,7 @@
   summary for current day."
   [[period]]
   (try
+    (write-current)
     (cond (and period (= period "all"))
           (log-summary' (into []
                               (comp (map #(edn/read-string (slurp %)))
@@ -247,7 +257,11 @@
                                       (map #(edn/read-string (slurp %)))
                                       cat)
                                 logs)))
-          :else (log-summary-for-period [(t/format "dd-MM-yyyy" (t/zoned-date-time))]))
+
+          (nil? period)
+          (log-summary-for-period [(t/format "dd-MM-yyyy" (t/local-date))])
+
+          :else
+          (println "Unsupported period. Use empty period, date, beg-date:end-date, or all"))
     (catch Exception _
-      ()
-      (println "Incorrect date format. Supported date format: dd-MM-yyyy"))))
+      (println "Error during reading logs"))))

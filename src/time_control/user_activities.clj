@@ -41,5 +41,7 @@
 (defn list-activities
   "Prints all available activities."
   [& _]
-  (doseq [[activity descr] (sort-by first compare (user-activities))]
-    (println activity "-" descr)))
+  (if-let [activities (seq (sort-by first compare (user-activities)))]
+    (doseq [[activity descr] activities]
+      (println activity "-" descr))
+    (println "No activities are defined. Use :a to create new activity type")))

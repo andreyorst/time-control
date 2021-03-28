@@ -1,21 +1,23 @@
 (ns time-control.core
-  (:require [clojure.pprint]
+  (:require [clojure.edn :as edn]
+            [clojure.pprint]
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
             [me.raynes.fs :as fs]
-            [time-control.user-activities :refer [add-activity remove-activity user-activities list-activities]]
             [time-control.log :refer [*log-dir*
                                       log
                                       log-file
-                                      write-log
+                                      write-current
                                       log-summary-for-period
                                       last-log-item-summary
                                       update-last-log-entry
                                       log-activity
                                       create-new-log
                                       find-previous-log]]
-            [clojure.edn :as edn])
+            [time-control.user-activities :refer [add-activity remove-activity user-activities list-activities]])
   (:gen-class))
+
+(def ^:dynamic *print-interval* 3000000)
 
 (defonce printer (atom nil))
 (defonce saver (atom nil))
@@ -58,7 +60,7 @@
   []
   (future-cancel @printer)
   (future-cancel @saver)
-  (write-log)
+  (write-current)
   (System/exit 0))
 
 
@@ -85,7 +87,9 @@
                    (let [file (create-new-log)]
                      (println "Created new log:" (str file))
                      (reset! log-file file)
-                     (log-activity "unknown" "unknown activity"))))}
+                     (log-activity "unknown" "unknown activity")
+                     (periodic-job printer *print-interval*
+                       (with-term-prompt (last-log-item-summary))))))}
 
    ":p" {:descr "Continue previous log"
          :func (fn [& _]
@@ -95,7 +99,9 @@
                      (println "Selected log:" (str file))
                      (reset! log-file file)
                      (reset! log (edn/read-string (slurp file)))
-                     (log-activity "unknown" "unknown activity"))))}
+                     (log-activity "unknown" "unknown activity")
+                     (periodic-job printer *print-interval*
+                       (with-term-prompt (last-log-item-summary))))))}
 
    ":c" {:descr "Current activity stats"
          :func (fn [& _] (last-log-item-summary))}
@@ -141,7 +147,9 @@
                       " for " cmd " (" (count req-args) ")"))))
     (if @log-file
       (if-let [activity (get (user-activities) cmd)]
-        (log-activity activity (str/join " " args))
+        (do (log-activity activity (str/join " " args))
+            (periodic-job printer *print-interval*
+              (with-term-prompt (last-log-item-summary))))
         (when (not-empty cmd)
           (if (str/starts-with? cmd ":")
             (do (println (str "Unknown command '" cmd "'"))
@@ -156,11 +164,9 @@
 (defn run
   "Starts two background jobs for logging current activity, and saving
   log file, and one foreground job for user input."
-  [{:keys [print-time save-time]}]
-  (periodic-job printer print-time
-    (with-term-prompt (last-log-item-summary)))
-  (periodic-job saver save-time
-    (write-log))
+  [{:keys [save-interval]}]
+  (periodic-job saver save-interval
+    (write-current))
   (loop []
     (if-some [input (read-input)]
       (case (-> input
@@ -173,7 +179,7 @@
 
 (def arg-opts
   [["-p"
-    "--print-time TIME"
+    "--print-interval TIME"
     "Interval in minutes to report current activity status"
     :default 300000
     :default-desc "5"
@@ -182,7 +188,7 @@
                     (edn/read-string)
                     (* 60 1000)))]
    ["-s"
-    "--save-time TIME"
+    "--save-interval TIME"
     "Interval in minutes to save activity log"
     :default 60000
     :default-desc "1"
@@ -212,7 +218,8 @@
     (when help
       (println summary)
       (System/exit 0))
-    (binding [*log-dir* log-dir]
+    (binding [*log-dir* log-dir
+              *print-interval* (:print-interval options)]
       (when-not (fs/exists? *log-dir*)
         (fs/mkdir *log-dir*))
       (run options))))
