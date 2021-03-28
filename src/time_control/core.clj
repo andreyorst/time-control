@@ -58,8 +58,10 @@
   "Cancel any running background jobs, write log file and exit the
   program."
   []
-  (future-cancel @printer)
-  (future-cancel @saver)
+  (when-some [printer @printer]
+    (future-cancel printer))
+  (when-some [saver @saver]
+    (future-cancel saver))
   (write-current)
   (System/exit 0))
 
