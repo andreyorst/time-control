@@ -219,8 +219,8 @@
     (when-let [line (and (>= last 0) (nth l last))]
       (println "Updated last activity to"
                (if-not (empty? category)
-                 (str type " - " (str/join " " descriptions))
-                 type))
+                 (str category " - " (str/join " " descriptions))
+                 category))
       (swap! log assoc last (-> line
                                 (assoc-in [0] category)
                                 (assoc-in [1 :descr] (str/join " " descriptions)))))))
