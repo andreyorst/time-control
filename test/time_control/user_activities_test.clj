@@ -13,7 +13,8 @@
 
 
 (defn- wrap-log-dir [test]
-  (binding [*log-dir* "test/data/time-log/"]
+  (binding [*log-dir* "test/data/time-log/"
+            acts/*activities-file* (fs/file *log-dir* ".commands.edn")]
     (test)))
 
 

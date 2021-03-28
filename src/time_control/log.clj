@@ -43,6 +43,7 @@
               (fs/glob (fs/file *log-dir*))
               (sort-by extract-log-date-id compare-log-names)))))
 
+
 (defn find-previous-log
   "Get last log by date."
   ([] (last (get-sorted-logs)))
