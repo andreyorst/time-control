@@ -3,21 +3,26 @@
             [clojure.pprint :as pp]
             [clojure.string :as str]
             [java-time :as t]
-            [me.raynes.fs :as fs])
+            [me.raynes.fs :as fs]
+            [time-control.user-activities :refer [user-activities]]
+            [flatland.ordered.map :refer [ordered-map]])
   (:import [java.time ZonedDateTime]))
 
-(def ^:dynamic *log-dir* (str (fs/file (fs/home) "time-log/")))
+(def ^:dynamic *log-dir* (str (fs/file (fs/home) "time-log")))
 
 (defonce log-file (atom nil))
 (defonce log (atom []))
 
+(def ^:const date-re
+  (re-pattern (str #"(?:(?:(?:0[1-9]|1[0-9]|2[0-8])-(?:0[1-9]|1[012]))|(?:29|30|31)-(?:0[13578]|1[02])|(?:29|30)-(?:0[4,6,9]|11))-(?:19|[2-9][0-9])\d\d"
+                   #"|(?:29-02-(?:19|[2-9][0-9])(?:00|04|08|12|16|20|24|28|32|36|40|44|48|52|56|60|64|68|72|76|80|84|88|92|96))")))
 
 (defn- extract-log-date-id
   "Extracts date string and optional index from `file`."
   [file]
   (->> file
        str
-       (re-find #"(\d{2}-\d{2}-\d{4})(?:-(\d+))?")
+       (re-find (re-pattern (str "(" date-re ")(?:-(\\d+))?")))
        (drop 1)))
 
 
@@ -55,7 +60,7 @@
   [file]
   (or (some->> file
                str
-               (re-find #"\d{2}-\d{2}-\d{4}-(\d+)\.time-log$")
+               (re-find (re-pattern (str date-re #"-(\d+)\.time-log$")))
                second
                Integer/parseInt)
       0))
@@ -116,10 +121,14 @@
   "Full log stats."
   [log]
   (some->> log
-           (reduce reduce-log-times {})
+           (reduce reduce-log-times (ordered-map))
            (map (fn [[k v]] [k (millis-to-dhms v)]))
-           (into {})))
+           (into (ordered-map))))
 
+(defn- sub-category-time [])
+
+(defn- category-stats [log category]
+  (keep #(when (= category (first %)) %) log))
 
 (defn- beg-end-log-dates
   "Find the earliest and latest dates in the log."
@@ -151,27 +160,32 @@
                                 (> seconds 0) (str seconds "s ")))))
 
 
-(defn- log-summary'
+(defn- print-log-start-end [log]
+  (let [{:keys [start end]} (beg-end-log-dates log)]
+    (println (str "Activity summary from "
+                  (t/format "dd-MM-yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant start) (t/zone-id)))
+                  " to "
+                  (t/format "dd-MM-yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant end) (t/zone-id)))))))
+
+
+(defn- print-log-summary'
   "Prints time statistics for the given log."
-  [log]
+  [log prefix]
   (if (seq log)
-    (let [total-stats (log-stats log)
-          {:keys [start end]} (beg-end-log-dates log)]
-      (println (str "Activity summary from "
-                    (t/format "dd MM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant start) (t/zone-id)))
-                    " to "
-                    (t/format "dd MM yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant end) (t/zone-id)))))
+    (let [total-stats (log-stats log)]
       (doseq [[category {:keys [days hours minutes seconds]
                          :or {days 0 hours 0 minutes 0 seconds 0}}] total-stats]
-        (print-time-summary category days hours minutes seconds)))
+        (print-time-summary (str prefix category) days hours minutes seconds)))
     (when @log-file
-      (println "Current log is empty"))))
+      (println (str prefix "Current log contains no data")))))
 
 
 (defn log-summary
   "Public API for printing activity stats only for the current log."
   []
-  (log-summary' @log))
+  (let [log @log]
+    (print-log-start-end log)
+    (print-log-summary' log "")))
 
 
 (defn last-log-item-summary
@@ -189,7 +203,7 @@
            category)
          days hours minutes seconds))
       (when @log-file
-        (println "Current log is empty")))))
+        (println "Current log contains no data")))))
 
 
 (defn log-activity
@@ -227,42 +241,70 @@
                                 (assoc-in [1 :descr] (str/join " " descriptions)))))))
 
 
-(defn log-summary-for-period
-  "Print log summary for given `period`.  If the `period` is `all`
-  gathers all logs in the `*log-dir*` and calculates stats for all
-  time.  If the `period` is date in the format of `dd-MM-yyyy` gathers
-  the info for this day only.  If `period` is two dates separated with
-  colon, gathers info for dates in this period.  Otherwise prints
-  summary for current day."
-  [[period]]
+(defn- gather-logs-in-period
+  "Get all log files for the given `period`.  If the `period` is `all`
+  gathers all logs in the `*log-dir*`.  If the `period` is date in the
+  format of `dd-MM-yyyy` gathers the logs for this day only.  If the
+  `period` is two dates separated with colon, gathers logs for dates
+  in this period.  Otherwise gets all logs for current day."
+  [period]
   (try
-    (write-current)
-    (cond (and period (= period "all"))
-          (log-summary' (into []
-                              (comp (map #(edn/read-string (slurp %)))
-                                    cat)
-                              (get-sorted-logs)))
+    (cond (= period "all")
+          (into []
+                (comp (map #(edn/read-string (slurp %)))
+                      cat)
+                (get-sorted-logs))
 
           (and period
-               (or (re-find #"\d{2}-\d{2}-\d{4}:\d{2}-\d{2}-\d{4}" period)
-                   (re-find #"\d{2}-\d{2}-\d{4}" period)))
+               (or (re-find (re-pattern (str date-re ":" date-re)) period)
+                   (re-find date-re period)))
           (let  [[start end] (str/split period #":")
                  end (t/local-date "dd-MM-yyyy" (or end start))
                  start (t/local-date "dd-MM-yyyy" start)
                  logs (get-sorted-logs)]
-            (log-summary' (into []
-                                (comp (filter #(let [[date] (extract-log-date-id %)]
-                                                 (not (t/before? (t/local-date "dd-MM-yyyy" date) start))))
-                                      (filter #(let [[date] (extract-log-date-id %)]
-                                                 (not (t/after? (t/local-date "dd-MM-yyyy" date) end))))
-                                      (map #(edn/read-string (slurp %)))
-                                      cat)
-                                logs)))
+            (into []
+                  (comp (filter #(let [[date] (extract-log-date-id %)]
+                                   (not (t/before? (t/local-date "dd-MM-yyyy" date) start))))
+                        (filter #(let [[date] (extract-log-date-id %)]
+                                   (not (t/after? (t/local-date "dd-MM-yyyy" date) end))))
+                        (map #(edn/read-string (slurp %)))
+                        cat)
+                  logs))
 
           (nil? period)
-          (log-summary-for-period [(t/format "dd-MM-yyyy" (t/local-date))])
+          (gather-logs-in-period (t/format "dd-MM-yyyy" (t/local-date)))
 
           :else
           (println "Unsupported period. Use empty period, date, beg-date:end-date, or all"))
-    (catch Exception _
-      (println "Error during reading logs"))))
+    (catch Exception e
+      (println "Error during reading logs" (.getMessage e)))))
+
+(defn log-summary-for-period
+  "Prints total log summary for given `period`."
+  [[period]]
+  (write-current)
+  (print-log-summary' (gather-logs-in-period period) ""))
+
+(defn- filter-by-category [log category]
+  (sequence (comp (keep #(when (= category (first %)) %))
+                  (map #(let [m (second %)
+                              category (:descr m)
+                              m (dissoc m :descr)]
+                          [category m])))
+            log))
+
+
+(defn- detailed-log-summary' [log category]
+  (println (str "Stats for category " category ":"))
+  (print-log-summary' (filter-by-category log category) "  "))
+
+
+(defn detailed-log-summary
+  "Prints detailed log summary for given `category` and `period`."
+  [[category period]]
+  (let [logs (gather-logs-in-period period)]
+    (print-log-start-end logs)
+    (cond
+      (= category "all") (doseq [category (vals (user-activities))]
+                           (detailed-log-summary' logs category))
+      :else (detailed-log-summary' logs category))))

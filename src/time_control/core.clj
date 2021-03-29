@@ -4,16 +4,17 @@
             [clojure.string :as str]
             [clojure.tools.cli :refer [parse-opts]]
             [me.raynes.fs :as fs]
-            [time-control.log :refer [*log-dir*
-                                      log
-                                      log-file
-                                      write-current
-                                      log-summary-for-period
+            [time-control.log :refer [create-new-log
+                                      detailed-log-summary
+                                      find-previous-log
                                       last-log-item-summary
-                                      update-last-log-entry
+                                      log
                                       log-activity
-                                      create-new-log
-                                      find-previous-log]]
+                                      log-file
+                                      log-summary-for-period
+                                      update-last-log-entry
+                                      write-current
+                                      *log-dir*]]
             [time-control.user-activities :refer [add-activity remove-activity user-activities list-activities]])
   (:gen-class))
 
@@ -74,11 +75,11 @@
          :func (fn [& _]
                  (doseq [[key {:keys [descr req-args opt-args]}] commands]
                    (println (str key
-                                 (if opt-args
-                                   (str " [" (str/join "] [" opt-args) "]")
-                                   "")
                                  (if req-args
                                    (str " <" (str/join "> <" req-args) ">")
+                                   "")
+                                 (if opt-args
+                                   (str " [" (str/join "] [" opt-args) "]")
                                    "")
                                  " - " descr))))}
 
@@ -91,7 +92,7 @@
                      (reset! log-file file)
                      (log-activity "unknown" "unknown activity")
                      (periodic-job printer *print-interval*
-                       (with-term-prompt (last-log-item-summary))))))}
+                                   (with-term-prompt (last-log-item-summary))))))}
 
    ":p" {:descr "Continue previous log"
          :func (fn [& _]
@@ -103,7 +104,7 @@
                      (reset! log (edn/read-string (slurp file)))
                      (log-activity "unknown" "unknown activity")
                      (periodic-job printer *print-interval*
-                       (with-term-prompt (last-log-item-summary))))))}
+                                   (with-term-prompt (last-log-item-summary))))))}
 
    ":c" {:descr "Current activity stats"
          :func (fn [& _] (last-log-item-summary))}
@@ -128,7 +129,12 @@
          :func update-last-log-entry}
 
    ":l" {:descr "List all available activities"
-         :func (fn [& _] (list-activities))}})
+         :func (fn [& _] (list-activities))}
+
+   ":d" {:descr "List all available activities"
+         :req-args ["category"]
+         :opt-args ["date|start-date:end-date|all"]
+         :func detailed-log-summary}})
 
 
 (defn execute
@@ -151,7 +157,7 @@
       (if-let [activity (get (user-activities) cmd)]
         (do (log-activity activity (str/join " " args))
             (periodic-job printer *print-interval*
-              (with-term-prompt (last-log-item-summary))))
+                          (with-term-prompt (last-log-item-summary))))
         (when (not-empty cmd)
           (if (str/starts-with? cmd ":")
             (do (println (str "Unknown command '" cmd "'"))
@@ -168,7 +174,7 @@
   log file, and one foreground job for user input."
   [{:keys [save-interval]}]
   (periodic-job saver save-interval
-    (write-current))
+                (write-current))
   (loop []
     (if-some [input (read-input)]
       (case (-> input

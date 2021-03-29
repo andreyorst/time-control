@@ -2,10 +2,9 @@
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pp]
             [clojure.string :as str]
-            [me.raynes.fs :as fs]
-            [time-control.log :refer [*log-dir*]]))
+            [me.raynes.fs :as fs]))
 
-(def ^:dynamic *activities-file* (fs/file *log-dir* ".commands.edn"))
+(def ^:dynamic *activities-file* (str (fs/file (fs/home) "time-log" ".commands.edn")))
 
 
 ;; Cached read of activity config file.  If file modification time is

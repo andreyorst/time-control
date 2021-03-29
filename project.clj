@@ -7,7 +7,8 @@
                  [clj-commons/fs "1.6.307"]
                  [clojure.java-time/clojure.java-time "0.3.2"]
                  [org.threeten/threeten-extra "1.6.0"]
-                 [org.clojure/tools.cli "1.0.206"]]
+                 [org.clojure/tools.cli "1.0.206"]
+                 [org.flatland/ordered "1.5.9"]]
   :main ^:skip-aot time-control.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})
