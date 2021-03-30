@@ -12,18 +12,14 @@
                       "t" "training"})
 
 
-(defn- wrap-log-dir [test]
-  (binding [*log-dir* "test/data/time-log/"
-            acts/*activities-file* (fs/file *log-dir* ".commands.edn")]
-    (test)))
-
-
 (defn- wrap-activity-file [test]
-  (fs/mkdirs *log-dir*)
-  (spit acts/*activities-file* (with-out-str (pp/pprint test-activities)))
-  (test)
-  (fs/delete acts/*activities-file*)
-  (fs/delete-dir *log-dir*))
+  (binding [*log-dir* (fs/file "test" "data" "time-log")
+            acts/*activities-file* (fs/file "test" "data" "time-log" ".commands.edn")]
+    (fs/mkdirs *log-dir*)
+    (spit acts/*activities-file* (with-out-str (pp/pprint test-activities)))
+    (test)
+    (fs/delete acts/*activities-file*)
+    (fs/delete-dir *log-dir*)))
 
 
 (defn- with-logging-slurp [test]
@@ -37,7 +33,6 @@
 
 
 (use-fixtures :each
-  wrap-log-dir
   wrap-activity-file
   with-logging-slurp)
 

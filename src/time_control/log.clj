@@ -60,7 +60,7 @@
   [file]
   (or (some->> file
                str
-               (re-find (re-pattern (str date-re #"-(\d+)\.time-log$")))
+               (re-find (re-pattern (str "(?:" date-re ")-(\\d+)\\.time-log$")))
                second
                Integer/parseInt)
       0))
@@ -177,7 +177,7 @@
                          :or {days 0 hours 0 minutes 0 seconds 0}}] total-stats]
         (print-time-summary (str prefix category) days hours minutes seconds)))
     (when @log-file
-      (println (str prefix "Current log contains no data")))))
+      (println (str prefix "No data")))))
 
 
 (defn log-summary
@@ -203,7 +203,7 @@
            category)
          days hours minutes seconds))
       (when @log-file
-        (println "Current log contains no data")))))
+        (println "No data")))))
 
 
 (defn log-activity
@@ -295,8 +295,16 @@
 
 
 (defn- detailed-log-summary' [log category]
-  (println (str "Stats for category " category ":"))
-  (print-log-summary' (filter-by-category log category) "  "))
+  (if-let [category-log (seq (filter-by-category log category))]
+    (let [{:keys [days hours minutes seconds]
+           :or {days 0 hours 0 minutes 0 seconds 0}}
+          (get (log-stats log) category)]
+      (println (str "Stats for category " category ":"))
+      (print-log-summary' category-log "  ")
+      (when (pos-int? (+ days hours minutes seconds))
+        (print (str "    " category " time summary"))
+        (print-time-summary "" days hours minutes seconds)))
+    (println "No stats for category" category)))
 
 
 (defn detailed-log-summary
@@ -304,7 +312,7 @@
   [[category period]]
   (let [logs (gather-logs-in-period period)]
     (print-log-start-end logs)
-    (cond
-      (= category "all") (doseq [category (vals (user-activities))]
-                           (detailed-log-summary' logs category))
-      :else (detailed-log-summary' logs category))))
+    (case category
+      "all" (doseq [category (vals (user-activities))]
+              (detailed-log-summary' logs category))
+      (detailed-log-summary' logs category))))
