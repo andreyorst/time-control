@@ -2,11 +2,13 @@
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pp]
             [clojure.string :as str]
-            [java-time :as t]
             [me.raynes.fs :as fs]
             [time-control.user-activities :refer [user-activities]]
+            [time-control.java-time :as jt]
             [flatland.ordered.map :refer [ordered-map]])
-  (:import [java.time ZonedDateTime]))
+  (:import [java.util Date]))
+
+(set! *warn-on-reflection* true)
 
 (def ^:dynamic *log-dir* (str (fs/file (fs/home) "time-log")))
 
@@ -29,8 +31,8 @@
 (defn- compare-log-names
   "Comparison of two log names based on dates and optional indexes."
   [[date1 num1] [date2 num2]]
-  (or (t/before? (t/local-date "dd-MM-yyyy" date1)
-                 (t/local-date "dd-MM-yyyy" date2))
+  (or (jt/before? (jt/local-date "dd-MM-yyyy" date1)
+                  (jt/local-date "dd-MM-yyyy" date2))
       (and (= date1 date2)
            (< (if num1 (Integer/parseInt num1) 0)
               (if num2 (Integer/parseInt num2) 0)))))
@@ -68,7 +70,7 @@
 
 (defn create-new-log
   "Creates new log file."
-  ([] (create-new-log (t/format "dd-MM-yyyy" (t/local-date))))
+  ([] (create-new-log (jt/format "dd-MM-yyyy" (jt/local-date))))
   ([date]
    (let [filename (str date ".time-log")
          unique-filename (if (fs/exists? (fs/file *log-dir* filename))
@@ -88,23 +90,24 @@
     (if (and (>= last 0)
              (nth log last)
              (nil? (get-in log [last 1 :end])))
-      (assoc-in log [last 1 :end] (t/java-date))
+      (assoc-in log [last 1 :end] (jt/now))
       log)))
 
 
 (defn- millis-to-dhms
   "Convert `millis` to days, hours, minutes, and seconds."
   [millis]
-  {:days (int (/ millis (* 1000 60 60 24)))
-   :hours (int (mod (/ millis (* 1000 60 60)) 60))
-   :minutes (int (mod (/ millis (* 1000 60)) 60))
+  {:days (int (/ millis 1000 60 60 24))
+   :hours (int (mod (/ millis 1000 60 60) 24))
+   :minutes (int (mod (/ millis 1000 60) 60))
    :seconds (int (mod (/ millis 1000) 60))})
 
 
 (defn- millis-between
   "Gets amount of milliseconds between two dates."
   [date-a date-b]
-  (Math/abs (- (t/to-millis-from-epoch date-a) (t/to-millis-from-epoch date-b))))
+  (let [res (- (inst-ms date-a) (inst-ms date-b))]
+    (if (< res 0) (- res) res)))
 
 
 (defn- reduce-log-times
@@ -112,9 +115,9 @@
   [total-stats [category {:keys [start end]}]]
   (if (get total-stats category)
     (update total-stats category (fn [now start end]
-                                   (+ now (millis-between start (or end (t/java-date)))))
+                                   (+ now (millis-between start (or end (jt/now)))))
             start end)
-    (assoc total-stats category (millis-between start (or end (t/java-date))))))
+    (assoc total-stats category (millis-between start (or end (jt/now))))))
 
 
 (defn- log-stats
@@ -122,26 +125,21 @@
   [log]
   (some->> log
            (reduce reduce-log-times (ordered-map))
-           (map (fn [[k v]] [k (millis-to-dhms v)]))
+           (map (fn [[k v]] [k {:dhms (millis-to-dhms v) :ms v}]))
            (into (ordered-map))))
-
-(defn- sub-category-time [])
-
-(defn- category-stats [log category]
-  (keep #(when (= category (first %)) %) log))
 
 (defn- beg-end-log-dates
   "Find the earliest and latest dates in the log."
   [log]
-  (loop [log-start nil
-         log-end nil
+  (loop [^Date log-start nil
+         ^Date log-end nil
          lines log]
     (if lines
-      (let [{:keys [start end]} (second (first lines))]
+      (let [{:keys [^Date start ^Date end]} (second (first lines))]
         (recur (if log-start
                  (if (.before start log-start) start log-start)
                  start)
-               (let [end (or end (t/java-date))]
+               (let [^Date end (or end (jt/now))]
                  (if log-end
                    (if (.after end log-end) end log-end)
                    end))
@@ -150,34 +148,52 @@
        :end log-end})))
 
 
-(defn- print-time-summary
+(defn- time-summary-str
   "Prints formatted message about time spent for given category."
-  [category days hours minutes seconds]
-  (println (str category ": " (cond-> ""
-                                (> days 0) (str days "d ")
-                                (> hours 0) (str hours "h ")
-                                (> minutes 0) (str minutes "m ")
-                                (> seconds 0) (str seconds "s ")))))
+  [{:keys [days hours minutes seconds]
+    :or {days 0 hours 0 minutes 0 seconds 0}}]
+  (str/trim (cond-> ""
+              (> days 0) (str days "d ")
+              (> hours 0) (str hours "h ")
+              (> minutes 0) (str minutes "m ")
+              (> seconds 0) (str seconds "s "))))
 
 
 (defn- print-log-start-end [log]
-  (let [{:keys [start end]} (beg-end-log-dates log)]
-    (println (str "Activity summary from "
-                  (t/format "dd-MM-yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant start) (t/zone-id)))
-                  " to "
-                  (t/format "dd-MM-yyyy HH:mm:ss" (ZonedDateTime/ofInstant (.toInstant end) (t/zone-id)))))))
+  (let [{:keys [^Date start ^Date end]} (beg-end-log-dates log)
+        start (jt/local-date-time start)
+        end (jt/local-date-time end)
+        [start-date start-time] (str/split (jt/format "dd-MM-yyyy HH:mm:ss" start) #" ")
+        [end-date end-time] (str/split (jt/format "dd-MM-yyyy HH:mm:ss" end) #" ")]
+    (println (if (= start-date end-date)
+               (str "Activity summary for " start-date
+                    " from " start-time " to " end-time)
+               (str "Activity summary from "
+                    start-date " " start-time
+                    " to "
+                    end-date " " end-time)))))
 
 
-(defn- print-log-summary'
+(defn- log-summary-str
   "Prints time statistics for the given log."
-  [log prefix]
+  [log]
   (if (seq log)
-    (let [total-stats (log-stats log)]
-      (doseq [[category {:keys [days hours minutes seconds]
-                         :or {days 0 hours 0 minutes 0 seconds 0}}] total-stats]
-        (print-time-summary (str prefix category) days hours minutes seconds)))
+    (let [total-stats (log-stats log)
+          total-ms (reduce (fn [t [_ {ms :ms}]] (+ t ms)) 0 total-stats)]
+      (->> total-stats
+           (mapv (fn [[category {:keys [dhms ms]}]]
+                   {"category" category
+                    "%" (/ (int (* 100 (/ (* ms 100) total-ms))) 100.0)
+                    "time" (time-summary-str dhms)}))
+           (sort-by #(get % "%") >)
+           (mapv (fn [row] (update row "%" #(str % "%"))))
+           (pp/print-table ["category" "%" "time"])
+           with-out-str
+           str/split-lines
+           (drop 3)
+           (str/join "\n")))
     (when @log-file
-      (println (str prefix "No data")))))
+      "No data")))
 
 
 (defn log-summary
@@ -185,7 +201,7 @@
   []
   (let [log @log]
     (print-log-start-end log)
-    (print-log-summary' log "")))
+    (println (log-summary-str log))))
 
 
 (defn last-log-item-summary
@@ -194,14 +210,12 @@
   (let [log @log]
     (if (seq log)
       (let [[category {:keys [descr]} :as last-line] (last log)
-            row-stats (log-stats [last-line])
-            {:keys [days hours minutes seconds]
-             :or {days 0 hours 0 minutes 0 seconds 0}} (first (vals row-stats))]
-        (print-time-summary
-         (if-not (empty? descr)
-           (str category " - " descr)
-           category)
-         days hours minutes seconds))
+            row-stats (log-stats [last-line])]
+        (println (if-not (empty? descr)
+                   (str category " - " descr ":")
+                   (str category ":"))
+
+                 (time-summary-str (:dhms (first (vals row-stats))))))
       (when @log-file
         (println "No data")))))
 
@@ -214,7 +228,7 @@
            (if-not (empty? descr) (str type " - " descr) type))
   (swap! log close-last-item)
   (swap! log conj [type {:descr descr
-                         :start (t/java-date)}]))
+                         :start (jt/now)}]))
 
 (defn write-current
   "Store current log on the file system."
@@ -249,41 +263,37 @@
   in this period.  Otherwise gets all logs for current day."
   [period]
   (try
-    (cond (= period "all")
-          (into []
-                (comp (map #(edn/read-string (slurp %)))
-                      cat)
-                (get-sorted-logs))
-
-          (and period
-               (or (re-find (re-pattern (str date-re ":" date-re)) period)
-                   (re-find date-re period)))
-          (let  [[start end] (str/split period #":")
-                 end (t/local-date "dd-MM-yyyy" (or end start))
-                 start (t/local-date "dd-MM-yyyy" start)
-                 logs (get-sorted-logs)]
+    (let [period (or period "")]
+      (cond (or (= period "all")
+                (= period ":"))
             (into []
-                  (comp (filter #(let [[date] (extract-log-date-id %)]
-                                   (not (t/before? (t/local-date "dd-MM-yyyy" date) start))))
-                        (filter #(let [[date] (extract-log-date-id %)]
-                                   (not (t/after? (t/local-date "dd-MM-yyyy" date) end))))
-                        (map #(edn/read-string (slurp %)))
+                  (comp (map #(edn/read-string (slurp %)))
                         cat)
-                  logs))
+                  (get-sorted-logs))
 
-          (nil? period)
-          (gather-logs-in-period (t/format "dd-MM-yyyy" (t/local-date)))
+            (re-find #":" period)
+            (let  [[start end] (str/split period #":")
+                   end (jt/local-date "dd-MM-yyyy" (if (empty? end) "01-01-3000" end))
+                   start (jt/local-date "dd-MM-yyyy" (if (empty? start) "01-01-1900" start))
+                   logs (get-sorted-logs)]
+              (into []
+                    (comp (filter #(let [[date] (extract-log-date-id %)]
+                                     (not (jt/before? (jt/local-date "dd-MM-yyyy" date) start))))
+                          (filter #(let [[date] (extract-log-date-id %)]
+                                     (not (jt/after? (jt/local-date "dd-MM-yyyy" date) end))))
+                          (map #(edn/read-string (slurp %)))
+                          cat)
+                    logs))
+            (re-find date-re period)
+            (gather-logs-in-period (str period ":" period))
+            (nil? period)
+            (gather-logs-in-period (jt/format "dd-MM-yyyy" (jt/local-date)))
 
-          :else
-          (println "Unsupported period. Use empty period, date, beg-date:end-date, or all"))
+            :else
+            (println "Unsupported period. Use empty period, date, beg-date:end-date, or all")))
     (catch Exception e
-      (println "Error during reading logs" (.getMessage e)))))
+      (println e "Error during reading logs:" (.getMessage e)))))
 
-(defn log-summary-for-period
-  "Prints total log summary for given `period`."
-  [[period]]
-  (write-current)
-  (print-log-summary' (gather-logs-in-period period) ""))
 
 (defn- filter-by-category [log category]
   (sequence (comp (keep #(when (= category (first %)) %))
@@ -297,22 +307,25 @@
 (defn- detailed-log-summary' [log category]
   (if-let [category-log (seq (filter-by-category log category))]
     (let [{:keys [days hours minutes seconds]
-           :or {days 0 hours 0 minutes 0 seconds 0}}
-          (get (log-stats log) category)]
-      (println (str "Stats for category " category ":"))
-      (print-log-summary' category-log "  ")
-      (when (pos-int? (+ days hours minutes seconds))
-        (print (str "    " category " time summary"))
-        (print-time-summary "" days hours minutes seconds)))
+           :or {days 0 hours 0 minutes 0 seconds 0}
+           :as dhms}
+          (:dhms (get (log-stats log) category))]
+      (println)
+      (if (pos-int? (+ days hours minutes seconds))
+        (println (str category " total time: " (time-summary-str dhms)))
+        (println category))
+      (println (log-summary-str category-log)))
     (println "No stats for category" category)))
 
 
 (defn detailed-log-summary
   "Prints detailed log summary for given `category` and `period`."
   [[category period]]
-  (let [logs (gather-logs-in-period period)]
-    (print-log-start-end logs)
-    (case category
-      "all" (doseq [category (vals (user-activities))]
-              (detailed-log-summary' logs category))
-      (detailed-log-summary' logs category))))
+  (let [period (or period (jt/format "dd-MM-yyyy" (jt/local-date)))]
+    (if-let [logs (seq (gather-logs-in-period period))]
+      (do (print-log-start-end logs)
+          (case category
+            "all" (doseq [category (vals (user-activities))]
+                    (detailed-log-summary' logs category))
+            (detailed-log-summary' logs category)))
+      (println "No stats for period" period))))

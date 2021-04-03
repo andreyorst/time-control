@@ -1,22 +1,27 @@
 (ns time-control.core
-  (:require [clojure.edn :as edn]
-            [clojure.pprint]
-            [clojure.string :as str]
-            [clojure.tools.cli :refer [parse-opts]]
-            [me.raynes.fs :as fs]
-            [time-control.log :refer [create-new-log
-                                      detailed-log-summary
-                                      find-previous-log
-                                      last-log-item-summary
-                                      log
-                                      log-activity
-                                      log-file
-                                      log-summary-for-period
-                                      update-last-log-entry
-                                      write-current
-                                      *log-dir*]]
-            [time-control.user-activities :refer [add-activity remove-activity user-activities list-activities]])
+  (:require
+   [clojure.edn :as edn]
+   [clojure.pprint]
+   [clojure.string :as str]
+   [clojure.tools.cli :refer [parse-opts]]
+   [me.raynes.fs :as fs]
+   [time-control.log :refer [create-new-log
+                             detailed-log-summary
+                             find-previous-log
+                             last-log-item-summary
+                             log
+                             log-activity
+                             log-file
+                             update-last-log-entry
+                             write-current
+                             *log-dir*]]
+   [time-control.user-activities :refer [add-activity
+                                         remove-activity
+                                         user-activities
+                                         list-activities]])
   (:gen-class))
+
+(set! *warn-on-reflection* true)
 
 (def ^:dynamic *print-interval* 3000000)
 
@@ -112,10 +117,6 @@
    ":e" {:descr "Exit"
          :func (constantly :exit)}
 
-   ":s" {:descr "Summary for given period"
-         :opt-args ["date|start-date:end-date|all"]
-         :func log-summary-for-period}
-
    ":a" {:descr "Add new activity type"
          :req-args ["name" "description*"]
          :func add-activity}
@@ -131,9 +132,9 @@
    ":l" {:descr "List all available activities"
          :func (fn [& _] (list-activities))}
 
-   ":d" {:descr "List all available activities"
+   ":s" {:descr "Summary for given category and period"
          :req-args ["category"]
-         :opt-args ["date|start-date:end-date|all"]
+         :opt-args ["date|[start-date]:[end-date]|all"]
          :func detailed-log-summary}})
 
 

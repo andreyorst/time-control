@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [me.raynes.fs :as fs]))
 
+(set! *warn-on-reflection* true)
+
 (def ^:dynamic *activities-file* (str (fs/file (fs/home) "time-log" ".commands.edn")))
 
 
