@@ -192,8 +192,7 @@
            str/split-lines
            (drop 3)
            (str/join "\n")))
-    (when @log-file
-      "No data")))
+    "No data"))
 
 
 (defn log-summary
@@ -214,10 +213,8 @@
         (println (if-not (empty? descr)
                    (str category " - " descr ":")
                    (str category ":"))
-
-                 (time-summary-str (:dhms (first (vals row-stats))))))
-      (when @log-file
-        (println "No data")))))
+                 (time-summary-str (-> row-stats vals first :dhms))))
+      (println "No data"))))
 
 
 (defn log-activity
@@ -305,7 +302,7 @@
 
 
 (defn- detailed-log-summary' [log category]
-  (if-let [category-log (seq (filter-by-category log category))]
+  (when-let [category-log (seq (filter-by-category log category))]
     (let [{:keys [days hours minutes seconds]
            :or {days 0 hours 0 minutes 0 seconds 0}
            :as dhms}
@@ -314,8 +311,7 @@
       (if (pos-int? (+ days hours minutes seconds))
         (println (str category " total time: " (time-summary-str dhms)))
         (println category))
-      (println (log-summary-str category-log)))
-    (println "No stats for category" category)))
+      (println (log-summary-str category-log)))))
 
 
 (defn detailed-log-summary

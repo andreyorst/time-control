@@ -165,7 +165,7 @@
                 (println ":h - list all commands"))
             (do (println (str "unknown activity '" cmd "'"))
                 (println ":l - list all activities")))))
-      (do (println "No log active")
+      (do (println "No log selected")
           (println ":n - create new log")
           (println ":p - continue last log")))))
 
