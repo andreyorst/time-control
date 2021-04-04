@@ -11,7 +11,7 @@
   :main ^:skip-aot time-control.core
   :target-path "target/%s"
   :native-image {:name      "time-control"
-                 :graal-bin "/home/andreyorst/Downloads/graalvm-ce-java11-21.0.0.2/bin"
+                 :graal-bin "/opt/graalvm-ce-java11-21.0.0.2/bin"
                  :opts      ["--verbose"
                              "--no-fallback"
                              "--initialize-at-build-time"
