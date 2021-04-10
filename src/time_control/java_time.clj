@@ -13,7 +13,10 @@
 (defn local-date ^LocalDate
   ([] (LocalDate/now))
   ([^Date date]
-   (LocalDate/ofInstant (.toInstant date) (ZoneId/systemDefault)))
+   (-> date
+       .toInstant
+       (LocalDateTime/ofInstant (ZoneId/systemDefault))
+       .toLocalDate))
   ([format-str date-str]
    (LocalDate/parse date-str (DateTimeFormatter/ofPattern format-str))))
 
